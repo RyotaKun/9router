@@ -3,6 +3,53 @@ const isNode = typeof process !== "undefined" && process.versions?.node && typeo
 
 // Check if logging is enabled via environment variable (default: false)
 const LOGGING_ENABLED = typeof process !== "undefined" && process.env?.ENABLE_REQUEST_LOGS === 'true';
+const ENV = typeof process !== "undefined" ? (process.env || {}) : {};
+const DEFAULT_MAX_LOG_ENTRIES = 50;
+const DEFAULT_MAX_LOG_FILE_BYTES = 256 * 1024;
+
+function boundedPositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const MAX_LOG_ENTRIES = boundedPositiveInt(ENV.REQUEST_LOG_MAX_ENTRIES, DEFAULT_MAX_LOG_ENTRIES);
+const MAX_LOG_FILE_BYTES = boundedPositiveInt(ENV.REQUEST_LOG_MAX_FILE_BYTES, DEFAULT_MAX_LOG_FILE_BYTES);
+const REDACTED = "[REDACTED]";
+const SENSITIVE_KEY = /authorization|cookie|token|secret|password|passwd|api[-_]?key|credential|session|jwt/i;
+
+function sanitizeString(value) {
+  return String(value)
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, `$1 ${REDACTED}`)
+    .replace(/([?&](?:access_token|refresh_token|api[-_]?key|token|secret|password)=)[^&\s]+/gi, `$1${REDACTED}`)
+    .replace(/("(?:access_token|refresh_token|api[-_]?key|token|secret|password|authorization)"\s*:\s*")[^"]*(")/gi, `$1${REDACTED}$2`)
+    .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,}\b/g, REDACTED)
+    .replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, REDACTED);
+}
+
+function sanitizeDiagnostic(value, key = "", seen = new WeakSet(), depth = 0) {
+  if (SENSITIVE_KEY.test(key)) return REDACTED;
+  if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return sanitizeString(value);
+  if (typeof value !== "object") return String(value);
+  if (depth >= 8) return "[TRUNCATED_DEPTH]";
+  if (seen.has(value)) return "[CIRCULAR]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.slice(0, 200).map((item) => sanitizeDiagnostic(item, "", seen, depth + 1));
+  const sanitized = {};
+  for (const [childKey, childValue] of Object.entries(value).slice(0, 200)) {
+    sanitized[childKey] = sanitizeDiagnostic(childValue, childKey, seen, depth + 1);
+  }
+  return sanitized;
+}
+
+function boundedJson(data, maxBytes = MAX_LOG_FILE_BYTES) {
+  const serialized = JSON.stringify(sanitizeDiagnostic(data), null, 2);
+  const originalBytes = Buffer.byteLength(serialized);
+  if (originalBytes <= maxBytes) return serialized;
+  const summary = JSON.stringify({ truncated: true, originalBytes }, null, 2);
+  if (Buffer.byteLength(summary) <= maxBytes) return summary;
+  return maxBytes >= 2 ? "{}" : "0";
+}
 
 let fs = null;
 let path = null;
@@ -18,6 +65,22 @@ async function ensureNodeModules() {
   } catch {
     // Running in non-Node environment (Worker, Browser, etc.)
   }
+}
+
+function enforceRetention(logsDir, maxEntries = MAX_LOG_ENTRIES, fsModule = fs, pathModule = path) {
+  if (!fsModule || !pathModule || !logsDir || !fsModule.existsSync(logsDir)) return [];
+  const entries = fsModule.readdirSync(logsDir, { withFileTypes: true })
+    .map((entry) => {
+      const fullPath = pathModule.join(logsDir, entry.name);
+      return { fullPath, mtimeMs: fsModule.statSync(fullPath).mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const removed = [];
+  for (const entry of entries.slice(maxEntries)) {
+    fsModule.rmSync(entry.fullPath, { recursive: true, force: true });
+    removed.push(entry.fullPath);
+  }
+  return removed;
 }
 
 // Format timestamp for folder name: 20251228_143045_123
@@ -42,6 +105,7 @@ async function createLogSession(sourceFormat, targetFormat, model) {
     if (!fs.existsSync(LOGS_DIR)) {
       fs.mkdirSync(LOGS_DIR, { recursive: true });
     }
+    enforceRetention(LOGS_DIR, Math.max(1, MAX_LOG_ENTRIES - 1));
     
     const timestamp = formatTimestamp();
     const safeModel = (model || "unknown").replace(/[/:]/g, "-");
@@ -63,31 +127,30 @@ function writeJsonFile(sessionPath, filename, data) {
   
   try {
     const filePath = path.join(sessionPath, filename);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    fs.writeFileSync(filePath, boundedJson(data));
   } catch (err) {
     console.log(`[LOG] Failed to write ${filename}:`, err.message);
   }
 }
 
-// Mask sensitive data in headers (DISABLED - keep full token for testing)
 function maskSensitiveHeaders(headers) {
   if (!headers) return {};
-  return { ...headers };
-  
-  // Old masking code (disabled):
-  // const masked = { ...headers };
-  // const sensitiveKeys = ["authorization", "x-api-key", "cookie", "token"];
-  // 
-  // for (const key of Object.keys(masked)) {
-  //   const lowerKey = key.toLowerCase();
-  //   if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
-  //     const value = masked[key];
-  //     if (value && value.length > 20) {
-  //       masked[key] = value.slice(0, 10) + "..." + value.slice(-5);
-  //     }
-  //   }
-  // }
-  // return masked;
+  const normalized = typeof headers.entries === "function" ? Object.fromEntries(headers.entries()) : headers;
+  return sanitizeDiagnostic(normalized);
+}
+
+function appendSanitizedFile(sessionPath, filename, chunk) {
+  if (!fs || !sessionPath) return;
+  try {
+    const filePath = path.join(sessionPath, filename);
+    const currentSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+    const remaining = MAX_LOG_FILE_BYTES - currentSize;
+    if (remaining <= 0) return;
+    const bytes = Buffer.from(sanitizeString(chunk));
+    fs.appendFileSync(filePath, bytes.subarray(0, remaining));
+  } catch {
+    // Diagnostics must never interfere with request handling.
+  }
 }
 
 // No-op logger when logging is disabled
@@ -177,24 +240,12 @@ export async function createRequestLogger(sourceFormat, targetFormat, model) {
     
     // 5. Append streaming chunk to provider response
     appendProviderChunk(chunk) {
-      if (!fs || !sessionPath) return;
-      try {
-        const filePath = path.join(sessionPath, "5_res_provider.txt");
-        fs.appendFileSync(filePath, chunk);
-      } catch (err) {
-        // Ignore append errors
-      }
+      appendSanitizedFile(sessionPath, "5_res_provider.txt", chunk);
     },
     
     // 6. Append OpenAI intermediate chunks (target → openai)
     appendOpenAIChunk(chunk) {
-      if (!fs || !sessionPath) return;
-      try {
-        const filePath = path.join(sessionPath, "6_res_openai.txt");
-        fs.appendFileSync(filePath, chunk);
-      } catch (err) {
-        // Ignore append errors
-      }
+      appendSanitizedFile(sessionPath, "6_res_openai.txt", chunk);
     },
     
     // 7. Log converted response to client (for non-streaming)
@@ -207,13 +258,7 @@ export async function createRequestLogger(sourceFormat, targetFormat, model) {
     
     // 7. Append streaming chunk to converted response
     appendConvertedChunk(chunk) {
-      if (!fs || !sessionPath) return;
-      try {
-        const filePath = path.join(sessionPath, "7_res_client.txt");
-        fs.appendFileSync(filePath, chunk);
-      } catch (err) {
-        // Ignore append errors
-      }
+      appendSanitizedFile(sessionPath, "7_res_client.txt", chunk);
     },
     
     // 6. Log error
@@ -227,6 +272,18 @@ export async function createRequestLogger(sourceFormat, targetFormat, model) {
     }
   };
 }
+
+export const __test__ = {
+  sanitizeDiagnostic,
+  sanitizeString,
+  boundedJson,
+  maskSensitiveHeaders,
+  enforceRetention,
+  defaults: {
+    maxEntries: DEFAULT_MAX_LOG_ENTRIES,
+    maxFileBytes: DEFAULT_MAX_LOG_FILE_BYTES,
+  },
+};
 
 // Legacy functions for backward compatibility
 export function logRequest() {}

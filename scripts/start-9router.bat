@@ -1,4 +1,3 @@
 @echo off
-cd /d "C:\repos\ryo_claude\ryo-9router\9router"
-call npm run dev -- -p 20128
-
+setlocal
+call "C:\repos\ryo_claude\ryo-9router\9router\scripts\start-9router-production.bat"
