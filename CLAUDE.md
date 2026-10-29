@@ -37,6 +37,7 @@ npm install                             # ROOT deps first — tests import from 
 cd tests && npm install                 # then tests' own deps (vitest) → tests/node_modules (allowed by tests/.gitignore)
 npx vitest run                          # all tests; auto-discovers tests/vitest.config.js
 npx vitest run unit/capabilities.test.js   # single file (path relative to tests/)
+node --test unit/custom-server-h2c.test.cjs   # Node test runner, not Vitest
 ```
 > The committed `tests/package.json` `test` script hardcodes Unix paths (`NODE_PATH=/tmp/node_modules …`) — a shared-install workaround from upstream. On Windows (or anywhere), ignore it and use the `npx vitest` form above; `vitest.config.js` resolves the `open-sse`/`@/` aliases from the repo root regardless of where vitest lives.
 >
@@ -47,6 +48,14 @@ npx vitest run unit/capabilities.test.js   # single file (path relative to tests
 > - `real/*.real.test.js` make live provider calls — need credentials, skip otherwise.
 - `*.real.test.js` under `tests/translator/real/` make live provider calls — skip unless credentials are set.
 - Regression baselines: `tests/__baseline__/verify-*.mjs` compare against committed snapshots (providers, aliases, OAuth URLs). Run these after touching provider registry / alias logic.
+- Run Vitest from `tests/`, not the repository root. Root execution bypasses `tests/vitest.config.js`
+  and produces false `open-sse` / `@/` alias failures. Some token-refresh files also contend during
+  one large concurrent batch on Windows; rerun timeout/order failures as isolated files with an
+  explicit module-load timeout before classifying them as regressions.
+- `tests/__baseline__/verify-no-regression.mjs` currently assumes an `/app/` path segment. On this
+  Windows checkout it maps failures to `undefined`, so its regression classification is not
+  authoritative until the path normalisation is fixed. Preserve the raw Vitest JSON and compare
+  named failing tests rather than claiming the inherited suite is green.
 
 ## Architecture
 
@@ -89,3 +98,13 @@ Pre-translate hooks that compress `tool_result` content in-place to cut tokens. 
 - Security-sensitive env: `JWT_SECRET` (session cookie), `INITIAL_PASSWORD` (default `123456` — must override), `API_KEY_SECRET`, `MACHINE_ID_SALT`. Full env contract in `.env.example` and ARCHITECTURE.md's env matrix.
 - Binary/protobuf upstreams (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through OpenAI — they're handled inside their own executor, not the translator.
 - Versioning: root and `cli/` are versioned independently; changes are logged in `CHANGELOG.md`. Commit style is Conventional Commits (`fix(translator): …`, `feat(...)`).
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

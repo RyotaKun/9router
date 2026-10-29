@@ -90,3 +90,6 @@ graphify-out/*
 
 # Kiro local workspace state
 .kiro/
+# Local validated image-routing standalone build (contains runtime environment files).
+/.next-image-local/
+/.next-image-ui/
