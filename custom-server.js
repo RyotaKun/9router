@@ -2,6 +2,12 @@ const dns = require("dns");
 if (typeof dns.setDefaultResultOrder === "function") {
   dns.setDefaultResultOrder("ipv4first");
 }
+try {
+  const { Agent, setGlobalDispatcher } = require("undici");
+  setGlobalDispatcher(new Agent({
+    connect: { family: 4 },
+  }));
+} catch {}
 
 const http = require("http");
 const path = require("path");

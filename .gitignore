@@ -93,6 +93,7 @@ graphify-out/*
 # Local validated image-routing standalone build (contains runtime environment files).
 /.next-image-local/
 /.next-image-ui/
+/.next-image-ui.v0.5.65-ryo/
 
 9router-*
 

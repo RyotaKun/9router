@@ -3,6 +3,12 @@ import dns from "node:dns";
 if (typeof dns.setDefaultResultOrder === "function") {
   dns.setDefaultResultOrder("ipv4first");
 }
+import { Agent, setGlobalDispatcher } from "undici";
+try {
+  setGlobalDispatcher(new Agent({
+    connect: { family: 4 },
+  }));
+} catch {}
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { dbg } from "./debugLog.js";
 
