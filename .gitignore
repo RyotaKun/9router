@@ -93,3 +93,17 @@ graphify-out/*
 # Local validated image-routing standalone build (contains runtime environment files).
 /.next-image-local/
 /.next-image-ui/
+
+9router-*
+
+# Local sensitive / temp files
+.engine-token.txt
+.tmp-prov.json
+.tmp-providers.json
+.oauth-session.json
+.dev-server.log
+.dev-server-err.log
+.start-dev.ps1
+start-dev-silent.cjs
+debug.log
+.scratch/
