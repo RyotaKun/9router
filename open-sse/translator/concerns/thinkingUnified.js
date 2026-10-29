@@ -139,7 +139,7 @@ function resolveFormat(targetFormat, model, provider) {
   if (transportFmt) return transportFmt;
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
-  if (targetFormat === "openai" || provider === "azure" || provider === "openai") {
+  if (provider === "azure" || provider === "openai") {
     // Azure and OpenAI endpoints only accept OpenAI reasoning format (reasoning_effort), never vendor-custom body.thinking
     return "openai";
   }

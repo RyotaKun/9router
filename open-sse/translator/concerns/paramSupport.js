@@ -98,7 +98,6 @@ export function stripUnsupportedParams(provider, model, body) {
         }
       }
     }
-    }
     // CF Workers AI oneOf root schema only accepts content as plain string (#1926)
     if (rule.flattenContent && Array.isArray(body.messages)) {
       for (const msg of body.messages) {
