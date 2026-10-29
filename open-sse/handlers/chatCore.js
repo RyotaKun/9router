@@ -219,9 +219,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     translatedBody.tools = translatedBody.tools.slice(0, 128);
   }
 
-  // For gpt-5, o-series, and codex models on OpenAI targets, ensure max_tokens -> max_completion_tokens
+  // For gpt-5/6, o-series, and codex models on OpenAI targets, ensure max_tokens -> max_completion_tokens
   if ((finalFormat === "openai" || provider === "azure" || provider === "openai" || provider === "github") &&
-      translatedBody.model && /gpt-5|o[134]-|o[134]$|codex/i.test(translatedBody.model) &&
+      translatedBody.model && /gpt-[56]|o[134]-|o[134]$|codex/i.test(translatedBody.model) &&
       translatedBody.max_tokens !== undefined) {
     translatedBody.max_completion_tokens = translatedBody.max_tokens;
     delete translatedBody.max_tokens;
@@ -233,11 +233,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     delete translatedBody.thinking_budget;
     delete translatedBody.output_config;
     delete translatedBody.enable_thinking;
-    // When tools are present for gpt-5.6 / reasoning models in Azure chat/completions, omit reasoning_effort
+    // When tools are present in Azure chat/completions, reasoning_effort must be explicitly set to "none"
     if (provider === "azure" && translatedBody.tools && Array.isArray(translatedBody.tools) && translatedBody.tools.length > 0) {
-      if (/gpt-5|o[134]-/i.test(translatedBody.model)) {
-        delete translatedBody.reasoning_effort;
-      }
+      translatedBody.reasoning_effort = "none";
     }
   }
 

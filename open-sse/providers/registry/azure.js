@@ -14,6 +14,13 @@ export default {
   },
   category: "apikey",
   hasProviderSpecificData: true,
+  serviceKinds: ["llm", "image"],
+  models: [
+    { id: "gpt-image-2", name: "GPT Image 2", kind: "image", params: ["n", "size", "quality"] },
+  ],
+  kindNotice: {
+    image: "Use the gpt-image-2 Azure deployment connection. Text-to-image generation is supported; image editing is not enabled. Connections are shared with Azure chat.",
+  },
   transport: {
     baseUrl: "",
     headers: {},

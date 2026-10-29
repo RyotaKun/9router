@@ -94,9 +94,9 @@ export class AzureExecutor extends DefaultExecutor {
     if (transformed.tools && Array.isArray(transformed.tools) && transformed.tools.length > 128) {
       transformed.tools = transformed.tools.slice(0, 128);
     }
-    // In Azure /chat/completions, function tools with reasoning_effort are rejected
+    // In Azure /chat/completions, function tools require reasoning_effort: "none"
     if (transformed.tools && Array.isArray(transformed.tools) && transformed.tools.length > 0) {
-      delete transformed.reasoning_effort;
+      transformed.reasoning_effort = "none";
     }
     return transformed;
   }
